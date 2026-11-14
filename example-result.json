@@ -1,0 +1,175 @@
+{
+ "pipeline": "scan-ctc@2",
+ "pages": [
+  {
+   "page": 1,
+   "width": 800,
+   "height": 600,
+   "lines": [
+    {
+     "words": [
+      {
+       "text": "Rechnung",
+       "box": [
+        80,
+        100,
+        202,
+        130
+       ],
+       "confidence": 0.99,
+       "source": "ctc"
+      },
+      {
+       "text": "Nr.",
+       "box": [
+        216,
+        100,
+        268,
+        130
+       ],
+       "confidence": 0.99,
+       "source": "ctc"
+      },
+      {
+       "text": "2026-0417",
+       "box": [
+        282,
+        100,
+        418,
+        130
+       ],
+       "confidence": 0.99,
+       "source": "ctc"
+      }
+     ]
+    },
+    {
+     "words": [
+      {
+       "text": "Datum:",
+       "box": [
+        80,
+        160,
+        174,
+        190
+       ],
+       "confidence": 0.99,
+       "source": "ctc"
+      },
+      {
+       "text": "14.11.2026",
+       "box": [
+        188,
+        160,
+        338,
+        190
+       ],
+       "confidence": 0.99,
+       "source": "ctc"
+      }
+     ]
+    },
+    {
+     "words": [
+      {
+       "text": "Muster",
+       "box": [
+        80,
+        220,
+        174,
+        250
+       ],
+       "confidence": 0.99,
+       "source": "ctc"
+      },
+      {
+       "text": "GmbH",
+       "box": [
+        188,
+        220,
+        254,
+        250
+       ],
+       "confidence": 0.99,
+       "source": "ctc"
+      },
+      {
+       "text": "Berlin",
+       "box": [
+        268,
+        220,
+        362,
+        250
+       ],
+       "confidence": 0.99,
+       "source": "ctc"
+      }
+     ]
+    },
+    {
+     "words": [
+      {
+       "text": "Gesamt:",
+       "box": [
+        80,
+        280,
+        188,
+        310
+       ],
+       "confidence": 0.99,
+       "source": "ctc"
+      },
+      {
+       "text": "1.234,56",
+       "box": [
+        202,
+        280,
+        324,
+        310
+       ],
+       "confidence": 0.93,
+       "source": "ctc"
+      },
+      {
+       "text": "EUR",
+       "box": [
+        338,
+        280,
+        390,
+        310
+       ],
+       "confidence": 0.99,
+       "source": "ctc"
+      }
+     ]
+    },
+    {
+     "words": [
+      {
+       "text": "Referenz",
+       "box": [
+        80,
+        340,
+        202,
+        370
+       ],
+       "confidence": 0.99,
+       "source": "ctc"
+      },
+      {
+       "text": "unleserlich",
+       "box": [
+        216,
+        340,
+        380,
+        370
+       ],
+       "confidence": 0.42,
+       "source": "ctc"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

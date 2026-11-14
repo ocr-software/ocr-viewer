@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OcrViewer example</title>
+<link rel="stylesheet" href="ocr-viewer.css">
+<style>body{margin:0;padding:16px;background:#fff;color:#14171f;font-family:system-ui,sans-serif}</style>
+</head>
+<body>
+<h1>OcrViewer on a foreign page</h1>
+<p>Synthetic invoice, no real data. Open this file over http (for example <code>python -m http.server</code> in this folder): the browser does not load the two JSON files from file://.</p>
+<div id="v"></div>
+<script src="ocr-viewer.js"></script>
+<script>
+  // result: the answer of GET /v1/jobs/{id}/result, extract: the answer of GET /v1/jobs/{id}/fields. Objects or URLs.
+  OcrViewer.mount(document.getElementById("v"), {
+    result: "example-result.json",
+    image: "example-page.png",
+    extract: "example-fields.json"
+  });
+</script>
+</body>
+</html>
