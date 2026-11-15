@@ -8,18 +8,18 @@ Every word of an OCR result in its box on the page image, with its confidence, t
 
 ## Tools
 
-Each tool is one section of `ocr-viewer.js`, marked `/* ---- name.js ---- */`.
+The viewer ships as the one file `ocr-viewer.js`; there are no separate `.js` files to look for. Inside it, each part starts with a comment like `/* ---- derive.js ---- */`, the name of the source part it was built from. Search the file for that comment to find a tool's code.
 
-| Tool | What it does | Section |
+| Tool | What it does | Search `ocr-viewer.js` for |
 |---|---|---|
-| <img src="screenshot-stage.png" width="180" alt=""><br>Page | The page with a box for every word, zoom, thumbnails | `stage.js`, `geometry.js` |
-| <img src="screenshot-text.png" width="180" alt=""><br>Text | The words of the page in reading order, to copy | `derive.js` |
-| <img src="screenshot-tables.png" width="180" alt=""><br>Tables | Every table as a grid, the weakest word of each cell, CSV | `resultview.js` |
-| <img src="screenshot-markdown.png" width="180" alt=""><br>Markdown | Headings and tables as Markdown, for a note or an LLM prompt | `derive.js` |
-| <img src="screenshot-json.png" width="180" alt=""><br>JSON | The page as the API returns it; a click on a word finds its place | `jsonview.js` |
-| <img src="screenshot-extract.png" width="180" alt=""><br>Extract | Fields from a schema, each value with its word boxes as proof (preview) | `extract.js`, `schemaedit.js` |
-| <img src="screenshot-split.png" width="180" alt=""><br>Split | A PDF cut into documents, as PDF or ZIP (preview) | `split.js` |
-| <img src="screenshot-redact.png" width="180" alt=""><br>Redact | Find names and numbers, black them out, save a PDF of page pictures | `find.js` |
+| <img src="screenshot-stage.png" width="180" alt=""><br>Page | The page with a box for every word, zoom, thumbnails | `---- stage.js ----`, `---- geometry.js ----` |
+| <img src="screenshot-text.png" width="180" alt=""><br>Text | The words of the page in reading order, to copy | `---- derive.js ----` |
+| <img src="screenshot-tables.png" width="180" alt=""><br>Tables | Every table as a grid, the weakest word of each cell, CSV | `---- resultview.js ----` |
+| <img src="screenshot-markdown.png" width="180" alt=""><br>Markdown | Headings and tables as Markdown, for a note or an LLM prompt | `---- derive.js ----` |
+| <img src="screenshot-json.png" width="180" alt=""><br>JSON | The page as the API returns it; a click on a word finds its place | `---- jsonview.js ----` |
+| <img src="screenshot-extract.png" width="180" alt=""><br>Extract | Fields from a schema, each value with its word boxes as proof (preview) | `---- extract.js ----`, `---- schemaedit.js ----` |
+| <img src="screenshot-split.png" width="180" alt=""><br>Split | A PDF cut into documents, as PDF or ZIP (preview) | `---- split.js ----` |
+| <img src="screenshot-redact.png" width="180" alt=""><br>Redact | Find names and numbers, black them out, save a PDF of page pictures | `---- find.js ----` |
 
 ## Use it
 
