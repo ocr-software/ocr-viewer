@@ -1732,12 +1732,57 @@ async function open(file) {
       frames = [c];
     } catch (e) { throw new ApiError('http', { code: 'unreadable' }); } finally { URL.revokeObjectURL(url); }
   }
-  return { kind, file, pages: frames.length, async draw(n) { return frames[Math.max(0, Math.min(frames.length - 1, n - 1))]; }, destroy() { frames = []; } };
+  /** @type {Map<string, HTMLCanvasElement>} */
+  const scaled = new Map();
+  return {
+    kind, file, pages: frames.length,
+    // a phone photo has 12 to 50 megapixels: like a PDF page it is drawn to at most maxSide on its long side (never larger than it is)
+    async draw(n, maxSide) {
+      const i = Math.max(0, Math.min(frames.length - 1, n - 1));
+      const f = frames[i];
+      const long = Math.max(f.width, f.height);
+      if (!maxSide || long <= maxSide) return f;
+      const key = i + ':' + maxSide;
+      const hit = scaled.get(key);
+      if (hit) return hit;
+      const k = maxSide / long;
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(f.width * k));
+      c.height = Math.max(1, Math.round(f.height * k));
+      const ctx = c.getContext('2d');
+      if (!ctx) throw new ApiError('http', { code: 'unreadable' });
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(f, 0, 0, c.width, c.height);
+      scaled.set(key, c);
+      return c;
+    },
+    destroy() { frames = []; scaled.clear(); },
+  };
 }
 
 /** @param {HTMLCanvasElement} c @returns {Promise<Blob>} */
 function toPng(c) {
   return new Promise((ok, no) => c.toBlob((b) => (b ? ok(b) : no(new ApiError('http', { code: 'unreadable' }))), 'image/png'));
+}
+
+/** @param {HTMLCanvasElement} c @param {string} type @param {number} [q] @returns {Promise<Blob>} */
+function blobOf(c, type, q) {
+  return new Promise((ok, no) => c.toBlob((b) => (b ? ok(b) : no(new ApiError('http', { code: 'unreadable' }))), type, q));
+}
+
+/**
+ * The one image of a page for the free test: PNG while it fits the limit; a photo seldom does (camera noise does not pack), so then JPEG
+ * at a high quality, then a lower one. The same canvas gives the same bytes, so the PDF of the page matches the page that was read.
+ * @param {HTMLCanvasElement} c @param {number} limit @returns {Promise<Blob>}
+ */
+async function pageImage(c, limit) {
+  const png = await toPng(c);
+  if (png.size <= limit) return png;
+  for (const q of [0.92, 0.8]) {
+    const j = await blobOf(c, 'image/jpeg', q);
+    if (j.size <= limit) return j;
+  }
+  throw new ApiError('http', { code: 'too_large_page' });
 }
 __exp.KINDS = KINDS;
 __exp.ACCEPT = ACCEPT;
@@ -1746,6 +1791,7 @@ __exp.loadPdfjs = loadPdfjs;
 __exp.openLog = openLog;
 __exp.open = open;
 __exp.toPng = toPng;
+__exp.pageImage = pageImage;
 };
 
 /* ---- session.js ---- */
@@ -1754,7 +1800,7 @@ __mods['session.js'] = function (__req, __exp) {
 // The driver: one document, one job at a time. It feeds the state machine with what the API answers; the view only listens.
 const { ApiError, sleep, randomId } = __req('api.js');
 const { INITIAL, next } = __req('machine.js');
-const { open, toPng } = __req('input.js');
+const { open, pageImage } = __req('input.js');
 const { LIMITS } = __req('limits.js');
 
 /** @typedef {import('./machine.js').State} State */
@@ -1831,8 +1877,7 @@ function createSession(o) {
             const n = Math.min(Math.max(1, opts.page || 1), doc.pages);
             const canvas = await doc.draw(n, 2400);
             if (canvas.width * canvas.height > LIMITS.page_pixels) throw new ApiError('http', { code: 'too_large_page' });
-            const png = await toPng(canvas);
-            if (png.size > Math.min(LIMITS.page_size, LIMITS.image_size, LIMITS.try_size)) throw new ApiError('http', { code: 'too_large_page' });
+            const png = await pageImage(canvas, Math.min(LIMITS.page_size, LIMITS.image_size, LIMITS.try_size));
             const ticket = o.tryTicket ? o.tryTicket() : '';
             const j = await o.api.tryPage(png, { pipeline: opts.pipeline, ticket, signal: sig });
             result = j.result;
@@ -2132,6 +2177,8 @@ const RESTORED_NOTE = 'The page image is no longer here, only the answer. Choose
 const KEY_AGAIN = 'This result needs your key. Enter the key again to open it.';
 const KEY_HINT = 'Your key stays in this browser.';
 const KEY_REMEMBER = 'Keep the key: store it in this browser.';
+/** Under the PDF download without a key: the file has the one page that was read. The text is the Texter's (open point, stops the live build). */
+const PDF_FREE_NOTE = 'Without a key, the PDF holds only the page that was read. With an API key, it holds every page.';
 const EMPTY_NO_KEY = 'One page is free without a key. For the whole document, add a key.';
 
 /** What the view of a card says when no document is open yet. */
@@ -2255,6 +2302,7 @@ __exp.RESTORED_NOTE = RESTORED_NOTE;
 __exp.KEY_AGAIN = KEY_AGAIN;
 __exp.KEY_HINT = KEY_HINT;
 __exp.KEY_REMEMBER = KEY_REMEMBER;
+__exp.PDF_FREE_NOTE = PDF_FREE_NOTE;
 __exp.EMPTY_NO_KEY = EMPTY_NO_KEY;
 __exp.NONE_TEXT = NONE_TEXT;
 __exp.NONE_GALLERY = NONE_GALLERY;
@@ -2385,6 +2433,37 @@ function defaultPipeline(c, status, hasKey = false) {
   return l.length ? l[0].pipeline : '';
 }
 
+/** What a card needs from the pipeline that reads, besides word boxes; "a|b" means one of the two. A card not listed needs nothing more. */
+const CARD_CAPS = /** @type {Record<string, string[]>} */ ({ md: ['layout_classes|table_cells'], tables: ['table_cells'], hocr: ['hocr'], pdf: ['pdf'] });
+
+/** The cards a page may ask for with `cards` (data-cards): the ids of the result, document and preview cards. */
+const CARD_IDS = ['text', 'md', 'tables', 'json', 'hocr', 'pdf', 'redact', 'name', 'extract', 'split', 'classify'];
+
+/**
+ * Can a page fix the reading pipeline to `want`? An empty string means yes. Otherwise the reason as a sentence of a person: the viewer then reads with the default
+ * pipeline and says so (never silently). The pipeline must be in the catalog, deliver word boxes and what the shown cards need, and without a key be part of the free test.
+ * @param {Catalog | null} c @param {any} status @param {boolean} hasKey @param {string} want @param {string[] | null} cards the cards shown, null = all
+ */
+function pipelineProblem(c, status, hasKey, want, cards) {
+  if (!want) return '';
+  if (!c) return 'The pipeline list of the service could not be read.';
+  const p = find(c, want);
+  if (!p || p.available === false || p.preview) return 'The pipeline ' + want + ' is not offered by this service.';
+  const caps = p.capabilities || {};
+  if (!caps.word_boxes) return 'The pipeline ' + want + ' gives no word boxes.';
+  for (const id of cards || []) {
+    for (const need of CARD_CAPS[id] || []) {
+      if (!need.split('|').some((k) => caps[k])) return 'The pipeline ' + want + ' does not give what the ' + id + ' card shows.';
+    }
+  }
+  if (!hasKey) {
+    const t = status && status.try;
+    const free = t && Array.isArray(t.pipelines) ? t.pipelines.map((/** @type {any} */ q) => q && q.pipeline) : [];
+    if (!free.includes(want)) return 'The free test does not read with ' + want + '.';
+  }
+  return '';
+}
+
 /** Choices of the DPI from the parameters of the catalog. @param {Catalog | null} c */
 function dpiChoices(c) {
   const p = c && c.parameters && c.parameters.find((x) => x.name === 'dpi');
@@ -2416,6 +2495,9 @@ __exp.withCap = withCap;
 __exp.needsLine = needsLine;
 __exp.secondsPerPage = secondsPerPage;
 __exp.defaultPipeline = defaultPipeline;
+__exp.CARD_CAPS = CARD_CAPS;
+__exp.CARD_IDS = CARD_IDS;
+__exp.pipelineProblem = pipelineProblem;
 __exp.dpiChoices = dpiChoices;
 __exp.estimateLeft = estimateLeft;
 __exp.humanSeconds = humanSeconds;
@@ -3126,9 +3208,9 @@ const { createApi, ApiError } = __req('api.js');
 const { createSession } = __req('session.js');
 const { busy } = __req('machine.js');
 const { createStage, h, pct } = __req('stage.js');
-const { STATE_TEXT, faultText, doneText, typeList, mib } = __req('strings.js');
+const { STATE_TEXT, PDF_FREE_NOTE, faultText, doneText, typeList, mib } = __req('strings.js');
 const { LIMITS } = __req('limits.js');
-const { needsLine, NEEDS_KEY, NEEDS_BOXES, CAP_WORDS, can, find, withCap, defaultPipeline, dpiChoices, secondsPerPage, estimateLeft } = __req('catalog.js');
+const { needsLine, NEEDS_KEY, NEEDS_BOXES, CAP_WORDS, can, find, withCap, defaultPipeline, pipelineProblem, CARD_IDS, dpiChoices, secondsPerPage, estimateLeft } = __req('catalog.js');
 const { deriveText, deriveMd } = __req('derive.js');
 const { reveal } = __req('reveal.js');
 const { capsule } = __req('capsule.js');
@@ -3205,6 +3287,8 @@ function mount(host, cfg) {
   let catalog = null;
   /** @type {any} */
   let status = null;
+  /** The catalog and status are read (or failed): only then is a pipeline asked for by the page judged. */
+  let choicesLoaded = false;
   /** The one memory of every setting of the cards (terms, schemas, threshold, layers, expert): it holds across documents and, where the page may remember, across a reload. */
   const mem = createMemory(cfg.remember ? store.pref : null, cfg.remember ? store.setPref : null);
   let expert = mem.get('expert') === '1';
@@ -3298,6 +3382,7 @@ function mount(host, cfg) {
   const retryBtn = h('button', { type: 'button', class: 'ov-btn', text: 'Try again', 'data-t': 'retry', hidden: '' });
   const faultRow = h('div', { class: 'ov-frow', hidden: '' }, faultEl, retryBtn);
   const noteEl = h('p', { role: 'status', hidden: '', 'data-t': 'note' });
+  /** The page asked for a pipeline that does not work here: said once and kept, the viewer reads with the default. */
   const notes = h('div', { class: 'ov-notes' }, faultRow, noteEl);
 
   const stageHost = h('div', { class: 'ov-pagewrap', hidden: '' });
@@ -3368,11 +3453,17 @@ function mount(host, cfg) {
   const res = () => session.result || (demo ? demo.result : null);
   const demoOn = () => !!(demo && demo.result);
   const pages = () => (res() && res().pages) || session.partial;
-  const ref = () => (session.opts && session.opts.pipeline) || (expert && pipeSel.value) || defaultPipeline(catalog, status, hasKey());
+  /** The cards this page shows (data-cards), null = all. Only known ids count; a list without any known id shows all, never an empty viewer. */
+  const cardList = (() => { const l = Array.isArray(cfg.cards) ? cfg.cards.map(String).filter((c) => CARD_IDS.includes(c)) : []; return l.length ? l : null; })();
+  /** Why the pipeline the page asks for (data-pipeline) cannot be used now, '' when it can. Looked at again after every change of key or catalog. */
+  const pipeProblem = () => pipelineProblem(catalog, status, hasKey(), cfg.pipeline ? String(cfg.pipeline) : '', cardList);
+  /** The pipeline a first reading uses: the one the page asks for if it works here, else the default. */
+  const startPipe = () => (cfg.pipeline && !pipeProblem() ? String(cfg.pipeline) : defaultPipeline(catalog, status, hasKey()));
+  const ref = () => (session.opts && session.opts.pipeline) || (expert && pipeSel.value) || startPipe();
   /** What the next request carries. The setup card is the one place: in everyday mode the catalog default holds and only the key is reachable. */
   const reqOpts = () => expert
     ? { pipeline: pipeSel.value || undefined, dpi: Number(dpiSel.value) || undefined, budget: Number(budIn.value) || undefined, idem: idemChk.checked }
-    : { pipeline: defaultPipeline(catalog, status, hasKey()) || undefined };
+    : { pipeline: startPipe() || undefined };
   const hasPages = () => !!(session.doc || demoOn());
 
   /** Side bar, thumbnails and the divider follow what is open; on a phone they lie over the page. */
@@ -3465,7 +3556,7 @@ function mount(host, cfg) {
   /** The demo of the home page is as tall as its page needs: a page in landscape leaves no empty field below it. */
   function fitDemo() {
     const wrap = /** @type {HTMLElement | null} */ (stageHost.querySelector('.ocv-page'));
-    if (!host.hasAttribute('data-demo-result') || root.classList.contains('focus') || !wrap) return;
+    if (!host.hasAttribute('data-demo-result') || host.hasAttribute('data-fixed-height') || root.classList.contains('focus') || !wrap) return;
     const want = Math.round(viewer.offsetHeight - stageSec.clientHeight + wrap.offsetHeight + 34);
     const h = Math.max(320, Math.min(want, 560));
     if (Math.abs(h - viewer.offsetHeight) > 2) host.style.setProperty('--ocv-height', h + 'px');
@@ -3716,7 +3807,7 @@ function mount(host, cfg) {
 
   /** The call below the setup follows every field, and so does the next real request. */
   function renderCall() {
-    const c = callText({ host: api.base, pipeline: pipeSel.value || defaultPipeline(catalog, status, hasKey()) || '', formats: fmtSel.value, dpi: dpiSel.value, budget: budIn.value, dry: dryChk.checked, idem: idemChk.checked });
+    const c = callText({ host: api.base, pipeline: pipeSel.value || startPipe() || '', formats: fmtSel.value, dpi: dpiSel.value, budget: budIn.value, dry: dryChk.checked, idem: idemChk.checked });
     curlPre.textContent = c.curl;
     pyPre.textContent = c.python;
   }
@@ -3971,9 +4062,10 @@ function mount(host, cfg) {
 
   function renderCards() {
     cardsEl.replaceChildren();
+    host.dataset.pipeline = startPipe() || '';
     const r = res();
     /** @param {string} title @param {HTMLElement[]} cards @param {string} [line] */
-    const group = (title, cards, line) => { cardsEl.append(h('div', { 'data-group': title }, h('h3', { class: 'ov-ovh', text: title }), ...(line ? [h('p', { class: 'ov-need', text: line })] : []), h('div', { class: 'ov-mgrid' }, ...cards))); };
+    const group = (title, all, line) => { const cards = cardList ? all.filter((b) => cardList.includes(/** @type {string} */ (b.dataset.card))) : all; if (!cards.length) return; cardsEl.append(h('div', { 'data-group': title }, h('h3', { class: 'ov-ovh', text: title }), ...(line ? [h('p', { class: 'ov-need', text: line })] : []), h('div', { class: 'ov-mgrid' }, ...cards))); };
     group('Result', [
       card('text', 'text', 'Text', () => formatView('text', 'Text', 'text', true, () => [outBox([textBlock(deriveText(r))], () => deriveText(r), 'text-out', fileOf('.txt', 'text/plain;charset=utf-8', () => deriveText(r))).el])),
       card('md', 'markdown', 'Markdown', () => formatView('md', 'Markdown', 'markdown', true, () => mdBody(r))),
@@ -3995,11 +4087,11 @@ function mount(host, cfg) {
         const go = h('button', { type: 'button', class: 'ov-btn ov-pri', 'data-t': 'pdf-save', text: 'Download ' + baseName() + '_ocr.pdf' });
         const pm = h('p', { class: 'ov-small', role: 'status', 'data-t': 'pdf-msg' });
         go.addEventListener('click', () => void getPdf(pm));
-        return [go, pm];
+        return [go, ...(!hasKey() && !gal ? [h('p', { class: 'ov-small', 'data-t': 'pdf-free-note', text: PDF_FREE_NOTE })] : []), pm];
       }, false)),
+      card('redact', '', 'Redact', redactView, NEEDS_BOXES),
+      card('name', '', 'Name', () => schemaView('name'), NEEDS_KEY),
     ]);
-    // the new cards of the blueprint
-    cardsEl.querySelector('[data-group="On the document"] .ov-mgrid')?.append(card('redact', '', 'Redact', redactView, NEEDS_BOXES), card('name', '', 'Name', () => schemaView('name'), NEEDS_KEY));
     // the switch of the preview is said once for the three cards, not on each of them
     group('Preview', /** @type {X.Kind[]} */ (['extract', 'split', 'classify']).map((k) => {
       const b = /** @type {HTMLButtonElement} */ (h('button', { type: 'button', class: 'ov-mc', 'data-card': k }));
@@ -4009,6 +4101,12 @@ function mount(host, cfg) {
     }), !catalog ? SERVICE_DOWN : X.offered(catalog) ? PREVIEW_LINE : faultText({ code: 'extract_off', status: 0, message: '' }));
     // the options of the service: only with Expert on
     if (expert) group('Expert', [card('pipes', '', 'Pipelines side by side', pipesView), card('x-api', '', 'API request setup', () => setupView(), SETUP_NEEDS), card('report', '', REPORT_TITLE, reportView, REPORT_NEEDS)]);
+    if (cfg.pipeline && choicesLoaded) {  // the page asked for a pipeline that cannot serve a card: say it on that card, never silently
+      for (const b of cardsEl.querySelectorAll('[data-card]')) {
+        const why = pipelineProblem(catalog, status, hasKey(), String(cfg.pipeline), [/** @type {HTMLElement} */ (b).dataset.card]);
+        if (why) b.append(h('span', { class: 'ov-need', role: 'status', 'data-t': 'pipeline-fallback', text: why + ' Reading with ' + (startPipe() || 'the default pipeline') + ' instead.' }));
+      }
+    }
   }
 
   /** The JSON with every word findable: a click on a word of the page marks it here, a click on it here marks its box. @param {any} r */
@@ -4384,9 +4482,9 @@ function mount(host, cfg) {
       tell(PDF_MAKING);
       if (session.mode === 'key' && id && d) b = await api.pdf(id, d.file, undefined);
       else if (d && res()) {
-        const { toPng } = await import('./input.js');
+        const { pageImage } = await import('./input.js');
         const n = session.opts.page || 1;
-        b = await api.tryPdf(res(), await toPng(await d.draw(n, 2400)), undefined);
+        b = await api.tryPdf(res(), await pageImage(await d.draw(n, 2400), Math.min(LIMITS.page_size, LIMITS.image_size, LIMITS.try_size)), undefined);
       }
       if (b) { const nm = baseName() + '_ocr.pdf'; save(b, nm); tell(pdfSaved(nm, b.size)); } else tell('');
     } catch (e) { tell(''); fail(e); }
@@ -4922,9 +5020,10 @@ function mount(host, cfg) {
   async function loadChoices() {
     try { catalog = await api.catalog(undefined); } catch (e) { /* cards then show no pipeline names */ }
     try { status = await api.status('', undefined); } catch (e) { /* no queue hint */ }
+    choicesLoaded = true;
     const list = withCap(catalog, 'word_boxes');
     pipeSel.replaceChildren(...list.map((p) => h('option', { value: p.pipeline, text: p.pipeline })));
-    const def = defaultPipeline(catalog, status, hasKey());
+    const def = startPipe();
     if (def) pipeSel.value = def;
     dpiSel.replaceChildren(h('option', { value: '', text: 'default' }), ...dpiChoices(catalog).map((n) => h('option', { value: String(n), text: String(n) })));
     renderCards();

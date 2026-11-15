@@ -218,6 +218,14 @@
 :where(.ocv .ov-side){position:absolute;right:0;top:0;bottom:0;z-index:4;flex:none;width:min(100%,400px);box-shadow:-2px 0 8px var(--ocv-shadow)}
 :where(.ocv .ov-grip){display:none}
 }
+/* the viewer in a narrow column of a wide window (hero of a solution page): the same compact toolbar as on a phone, by the width of the viewer, not of the window */
+.ocv{container:ocv/inline-size}
+@container ocv (max-width:699px){
+.ocv .ov-thumbs{display:none}
+.ocv .ov-zg,.ocv .ov-pgw{display:none}
+.ocv .ov-pg{margin-left:2px;gap:3px}
+.ocv .ov-pg input{width:2.8em}
+}
 @media (max-width:699px){
 :where(.ocv .ov-zg,.ocv .ov-pgw){display:none}
 :where(.ocv .ov-only-n){display:block}
