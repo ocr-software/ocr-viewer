@@ -1,44 +1,56 @@
 # OCR viewer: word boxes, confidence and layout for OCR results, in any web page
 
-Show an OCR result on top of the page image: every word in its box, how sure the OCR is about it, and the layout. One JavaScript file, one CSS file, no other library. For results from the [ocr-software.com](https://ocr-software.com/) API.
+Every word of an OCR result in its box on the page image, with its confidence, the tables and the layout. One JavaScript file, one CSS file, no other library. For results from the [ocr-software.com](https://ocr-software.com/) API, hosted or on your own server.
 
-![OCR viewer showing an invoice with the field "total" and its word box highlighted](screenshot-extract.png)
+**[Open the live viewer](https://ocr-software.com/app/)**: drop a PDF or photo, one page is free without a key.
 
-## What it shows
+![The viewer on a skewed invoice: word boxes on the page, the tools in the side panel](screenshot-stage.png)
 
-- **Word boxes.** Each word sits in its box on the page image. A click on a word or a field shows where it came from.
-- **Confidence.** Every word carries a value from 0 to 1. Set a threshold and the viewer marks the words below it.
-- **Layout.** Lines, blocks and tables, as the service found them, plus the text, formatted text, hOCR and JSON of the same page.
-- **Extract, Split and Classify (Preview, free, quality still improving).** Give the service a schema and get fields back, each with its word boxes as proof. A field without proof on the page is marked, never filled in. Split cuts a stack of pages into documents, Classify names the document type. Expect mistakes and check what matters.
+## Tools
 
-## Quick start
+Each tool is one section of `ocr-viewer.js`, marked `/* ---- name.js ---- */`.
 
-You need a result from the API and the page image. The viewer does not read documents itself.
+| Tool | What it does | Section |
+|---|---|---|
+| <img src="screenshot-stage.png" width="180" alt=""><br>Page | The page with a box for every word, zoom, thumbnails | `stage.js`, `geometry.js` |
+| <img src="screenshot-text.png" width="180" alt=""><br>Text | The words of the page in reading order, to copy | `derive.js` |
+| <img src="screenshot-tables.png" width="180" alt=""><br>Tables | Every table as a grid, the weakest word of each cell, CSV | `resultview.js` |
+| <img src="screenshot-markdown.png" width="180" alt=""><br>Markdown | Headings and tables as Markdown, for a note or an LLM prompt | `derive.js` |
+| <img src="screenshot-json.png" width="180" alt=""><br>JSON | The page as the API returns it; a click on a word finds its place | `jsonview.js` |
+| <img src="screenshot-extract.png" width="180" alt=""><br>Extract | Fields from a schema, each value with its word boxes as proof (preview) | `extract.js`, `schemaedit.js` |
+| <img src="screenshot-split.png" width="180" alt=""><br>Split | A PDF cut into documents, as PDF or ZIP (preview) | `split.js` |
+| <img src="screenshot-redact.png" width="180" alt=""><br>Redact | Find names and numbers, black them out, save a PDF of page pictures | `find.js` |
 
-```sh
-curl -s -X POST "https://api.ocr-software.com/v1/jobs?pipeline=scan-ctc@2&formats=json" -H "Authorization: Bearer $OCR_KEY" --data-binary @page.pdf   # note the job_id
-curl -s "https://api.ocr-software.com/v1/jobs/$JOB_ID/result?format=json" -H "Authorization: Bearer $OCR_KEY" -o result.json   # when the job is done
-```
+## Use it
+
+Embed a result you fetched yourself. The viewer does not read documents in this mode.
 
 ```html
 <link rel="stylesheet" href="ocr-viewer.css"><div id="v"></div><script src="ocr-viewer.js"></script>
 <script>OcrViewer.mount(document.getElementById("v"), {result: "result.json", image: "page.png"});</script>
 ```
 
-`example.html` is the whole thing with sample data. Serve this folder over http (`python -m http.server`); a browser does not load the JSON files from `file://`.
+Or mount the whole viewer, with file choice and reading: `OcrViewer.mount(el, {api: "https://api.ocr-software.com"})`.
 
-## You need a key
+Serve this folder over http (`python -m http.server`) and open `example.html`; a browser does not load the JSON files from `file://`. Get a result with the [API guide](https://ocr-software.com/docs/api-guide/). A key is free: [get one](https://ocr-software.com/order/). Keep it out of public pages: fetch the result on your server and hand the viewer the JSON.
 
-The API needs a key. It is free: get one at [ocr-software.com/order/](https://ocr-software.com/order/). Never put the key in a public page. Fetch the result on your server and hand the viewer the JSON. Don't have a key yet? [Try one page without one](https://ocr-software.com/try/).
+Your own server answers the same calls: swap the address, the viewer shows the result unchanged ([install](https://ocr-software.com/docs/install/)).
 
-## Docs and test
+## Add a tool
 
-- [API documentation](https://ocr-software.com/docs/)
-- [Try a page in the browser](https://ocr-software.com/try/)
+1. Decide what the tool needs. `GET https://api.ocr-software.com/v1/catalog` lists the capabilities of each pipeline (`word_boxes`, `layout_classes`, `table_cells` ...). Name one as the capability of the tool, and the viewer says "Works after a run with ..." on its card by itself.
+2. Look at the data you get: the result fields are in [`openapi.json`](https://api.ocr-software.com/openapi.json) and on the [API reference](https://ocr-software.com/docs/reference/).
+3. In `ocr-viewer.js`, add one sentence for the card to `CARD_TEXT` (section `strings.js`).
+4. In the section `viewer.js`, add `card('mytool', 'word_boxes', 'My tool', myView)` to a group of cards, and write `myView`: it calls `openPanel('mytool', 'My tool', needs, ...nodes)` with the elements to show.
+5. Reload `example.html` and click your card.
+
+## Issues and pull requests
+
+Issues are welcome now: a bug, a result shown wrongly, a missing tool. Attach the result JSON without personal data, or say what the page looked like. Pull requests are accepted as soon as the contributor license agreement (CLA) is ready; until then please open an issue.
 
 ## License
 
-AGPL-3.0, see `LICENSE`. A commercial license is available on request via [ocr-software.com](https://ocr-software.com/).
+AGPL-3.0, see `LICENSE`. Use it as it is, or change it for your own use, and you owe nothing. Change it and offer it to others, or build it into a product, and the changes go public under the same license. [Ask for a commercial license](https://ocr-software.com/contact/).
 
 ## Provider and legal
 

@@ -1,0 +1,91 @@
+[
+  {
+    "id": "invoice",
+    "label": "Invoice (company)",
+    "use": "extract",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "sender": { "type": "string", "description": "Name of the company that issued the invoice" },
+        "recipient": { "type": "string", "description": "Name of the company or person the invoice is addressed to" },
+        "invoice_number": { "type": "string", "description": "Invoice number as printed" },
+        "invoice_date": { "type": "string", "format": "date", "description": "Invoice date as ISO 8601, YYYY-MM-DD" },
+        "customer_number": { "type": "string", "description": "Customer number as printed" },
+        "net_total": { "type": "string", "description": "Subtotal before tax, as printed" },
+        "vat_amount": { "type": "string", "description": "Tax amount, as printed" },
+        "total_due": { "type": "string", "description": "Final amount to pay, as printed" },
+        "payment_terms": { "type": "string", "description": "Payment terms sentence, as printed" },
+        "iban": { "type": "string", "description": "IBAN of the payee, as printed" }
+      }
+    }
+  },
+  {
+    "id": "bank-statement",
+    "label": "Bank statement (bank)",
+    "use": "extract",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "bank_name": { "type": "string", "description": "Name of the bank" },
+        "account_holder": { "type": "string", "description": "Name of the account holder" },
+        "iban": { "type": "string", "description": "IBAN of the account, as printed" },
+        "statement_number": { "type": "string", "description": "Statement number as printed" },
+        "statement_date": { "type": "string", "format": "date", "description": "Statement date as ISO 8601, YYYY-MM-DD" },
+        "statement_period": { "type": "string", "description": "Period the statement covers, as printed" },
+        "opening_balance": { "type": "string", "description": "Opening balance (previous balance), as printed" },
+        "closing_balance": { "type": "string", "description": "Closing balance (new balance), as printed" }
+      }
+    }
+  },
+  {
+    "id": "insurance-claim",
+    "label": "Claim report (insurance)",
+    "use": "extract",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "insurer": { "type": "string", "description": "Name of the insurance company" },
+        "claim_number": { "type": "string", "description": "Claim number as printed" },
+        "policy_number": { "type": "string", "description": "Policy number as printed" },
+        "policyholder": { "type": "string", "description": "Name of the policyholder" },
+        "date_of_loss": { "type": "string", "format": "date", "description": "Date the loss happened as ISO 8601, YYYY-MM-DD" },
+        "report_date": { "type": "string", "format": "date", "description": "Date the claim was reported as ISO 8601, YYYY-MM-DD" },
+        "loss_location": { "type": "string", "description": "Place where the loss happened, as printed" },
+        "loss_description": { "type": "string", "description": "Short description of what happened, as written" },
+        "claimed_amount": { "type": "string", "description": "Amount claimed or estimated damage, as printed" }
+      }
+    }
+  },
+  {
+    "id": "official-notice",
+    "label": "Official notice (authority)",
+    "use": "extract",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "authority": { "type": "string", "description": "Name of the authority that issued the notice" },
+        "reference_number": { "type": "string", "description": "File number or reference as printed" },
+        "notice_date": { "type": "string", "format": "date", "description": "Date of the notice as ISO 8601, YYYY-MM-DD" },
+        "recipient": { "type": "string", "description": "Name of the person or company the notice is addressed to" },
+        "subject": { "type": "string", "description": "Subject line, as printed" },
+        "amount": { "type": "string", "description": "Amount to pay or refund, as printed" },
+        "objection_period": { "type": "string", "description": "Sentence on how long and where to object, as printed" }
+      }
+    }
+  },
+  {
+    "id": "mailroom",
+    "label": "Mailroom classes",
+    "use": "classify",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "document_class": {
+          "type": "string",
+          "enum": ["invoice", "bank_statement", "insurance_claim", "official_notice", "contract", "application_form", "delivery_note", "letter", "other"],
+          "description": "Class of the page. invoice: bill with items, totals and payment details. bank_statement: list of account transactions with balance. insurance_claim: report of a loss to an insurer. official_notice: decision or notice from an authority or court. contract: agreement with clauses and signatures. application_form: form with fields to fill in. delivery_note: goods and quantities without prices. letter: running text with salutation. other: none of these"
+        }
+      }
+    }
+  }
+]

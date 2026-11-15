@@ -13,11 +13,10 @@
 <div id="v"></div>
 <script src="ocr-viewer.js"></script>
 <script>
-  // result: the answer of GET /v1/jobs/{id}/result, extract: the answer of GET /v1/jobs/{id}/fields. Objects or URLs.
+  // result: the answer of GET /v1/jobs/{id}/result (object or URL), image: the page picture (URL).
   OcrViewer.mount(document.getElementById("v"), {
     result: "example-result.json",
-    image: "example-page.png",
-    extract: "example-fields.json"
+    image: "example-page.png"
   });
 </script>
 </body>
