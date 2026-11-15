@@ -1592,7 +1592,7 @@ const LIMITS = {
   pages_per_document: 1000,
   file_types: ["pdf", "png", "jpeg", "tiff"],
   try_size: 10485760,
-  extract_pages_per_day: 50,
+  extract_pages_per_day: 500,
 };
 __exp.LIMITS = LIMITS;
 };
@@ -2064,7 +2064,8 @@ function faultText(f) {
     case 'pdf_open': return 'Could not open this PDF in the browser. Try again.';
     case 'unreadable': return 'This file did not open. Try a ' + types + '.';
     case 'capability_missing': return 'The service does not offer this for the chosen pipeline.';
-    case 'rate_limited': return 'The free preview of Extract and Split takes ' + LIMITS.extract_pages_per_day + ' pages per key and day, and the pages of today are used up. It starts again tomorrow (UTC). Text, tables and the PDF still work.';
+    case 'rate_limited': return 'The free preview has reached its limit for today. It starts again tomorrow (UTC).';
+    case 'extract_rate_limited': return 'The free preview of Extract and Split takes ' + LIMITS.extract_pages_per_day + ' pages per key and day, and the pages of today are used up. It starts again tomorrow (UTC). Text, tables and the PDF still work.';
     case 'page_failed': return 'This page could not be read. The other pages are fine. Try the page again.';
     case 'extract_off': return 'This preview is switched off for now. The text, the tables and the PDF still work.';
     default:
@@ -2156,6 +2157,11 @@ const LOG_NEEDS_OFF = 'Works after you switch it on and run the page again.';
 const LOG_OFF = 'The log is off. Switch on "Record the API requests of this page" in the API request setup, then run the page again.';
 const KEY_GET = 'Get an API key';
 const NEW_FILE = 'Open another file';
+/** The full window button: the hint at first visit, the label inside the full window, the close of the hint. Placeholders until the Texter writes them (texter-app-titel.md). */
+const WIDE_ENTER = 'Full window';
+const WIDE_EXIT = 'Exit full window';
+const WIDE_HINT = 'Open in full window';
+const WIDE_HINT_CLOSE = 'Close this hint';
 const HOST_PLAIN = 'A secure page cannot reach a plain http host on another machine from the browser; the curl call above works. For a test here use https or http://localhost.';
 const HOST_BAD = 'Enter a host such as https://api.ocr-software.com';
 
@@ -2176,6 +2182,11 @@ const REPORT_NONE = 'No job report is stored for this example.';
 const REPORT_NOJOB = 'No job report yet. Read a page with your key to get one.';
 const REPORT_FAIL = 'The job report could not be loaded. The service may have dropped the job after its retention time.';
 const REPORT_LOG = 'Requests of this browser';
+// PLATZHALTER fuer den Texter: die Saetze der Job-Karten (Job ID, Kopieren, Warnung model_output_incomplete)
+const REPORT_JOB_ID = 'Job ID';
+const REPORT_COPY_ID = 'Copy job ID';
+const REPORT_COPIED = 'Copied';
+const REPORT_JOB_KIND = { ocr: 'Read', extract: 'Extract', split: 'Split', classify: 'Classify', name: 'Name' };
 const PREVIEW_LINE = 'Preview: the service may change these tools. They need your key and the file.';
 
 /** The pages the split got no model answer for, with the code the service gave: "Pages 1 to 3 (extract_failed)": a run of three or more is "a to b". @param {Array<{page: number, code: string}>} items */
@@ -2206,6 +2217,11 @@ const SPLIT_CODE = {
   extract_unavailable: 'the model gave no answer, so its cut is only a guess. Read it again in a moment.',
   extract_failed: 'the answer of the model did not fit, so its cut is only a guess. Reading it again rarely changes that; set the cut by hand.',
 };
+/** One page of a job report with its code and the sentence for it. @param {number} page @param {string} code */
+function pageNote(page, code) {
+  const t = code === 'model_output_incomplete' ? 'the answer of the model was cut off; the missing words come from the CTC reading and are flagged. (Platzhalter)' : SPLIT_CODE[code] || SPLIT_OTHER;
+  return 'Page ' + page + (code ? ' (' + code + ')' : '') + ': ' + t;
+}
 const SPLIT_OTHER = 'the model gave no answer, so its cut is only a guess. Read it again, or set the cut by hand.';
 const SPLIT_AGAIN = 'Read these pages again';
 __exp.typeList = typeList;
@@ -2252,6 +2268,10 @@ __exp.LOG_NEEDS_OFF = LOG_NEEDS_OFF;
 __exp.LOG_OFF = LOG_OFF;
 __exp.KEY_GET = KEY_GET;
 __exp.NEW_FILE = NEW_FILE;
+__exp.WIDE_ENTER = WIDE_ENTER;
+__exp.WIDE_EXIT = WIDE_EXIT;
+__exp.WIDE_HINT = WIDE_HINT;
+__exp.WIDE_HINT_CLOSE = WIDE_HINT_CLOSE;
 __exp.HOST_PLAIN = HOST_PLAIN;
 __exp.HOST_BAD = HOST_BAD;
 __exp.COUNT_TIP = COUNT_TIP;
@@ -2266,9 +2286,14 @@ __exp.REPORT_NONE = REPORT_NONE;
 __exp.REPORT_NOJOB = REPORT_NOJOB;
 __exp.REPORT_FAIL = REPORT_FAIL;
 __exp.REPORT_LOG = REPORT_LOG;
+__exp.REPORT_JOB_ID = REPORT_JOB_ID;
+__exp.REPORT_COPY_ID = REPORT_COPY_ID;
+__exp.REPORT_COPIED = REPORT_COPIED;
+__exp.REPORT_JOB_KIND = REPORT_JOB_KIND;
 __exp.PREVIEW_LINE = PREVIEW_LINE;
 __exp.splitFailed = splitFailed;
 __exp.SPLIT_CODE = SPLIT_CODE;
+__exp.pageNote = pageNote;
 __exp.SPLIT_AGAIN = SPLIT_AGAIN;
 };
 
@@ -2633,6 +2658,18 @@ function failedInfo(ans) {
   return [...nums].filter((n) => n > 0).sort((a, b) => a - b).map((n) => ({ page: n, code: code(n) }));
 }
 
+/** Pages of a job with an error or a warning, with the code: for the job report. @param {any} ans @returns {Array<{page: number, code: string}>} */
+function pageNotes(ans) {
+  const out = failedInfo(ans);
+  for (const p of (ans && Array.isArray(ans.pages) ? ans.pages : [])) {
+    for (const w of (p && Array.isArray(p.warnings) ? p.warnings : [])) {
+      const code = typeof w === 'string' ? w : (w && w.code) || '';
+      if (code && !out.some((x) => x.page === Number(p.page) && x.code === code)) out.push({ page: Number(p.page) || 0, code: String(code) });
+    }
+  }
+  return out;
+}
+
 /** Documents of a split: the pages where starts_document is yes begin a new one. @param {any} ans @returns {Array<{from: number, to: number}>} */
 function splitDocs(ans) {
   const list = splitList(ans);
@@ -2656,7 +2693,7 @@ function splitDocs(ans) {
  * @param {import('./api.js').Api} api
  * @param {File} file
  * @param {Kind} kind
- * @param {{signal: AbortSignal, onJob?: (j: any) => void, schema?: any}} o
+ * @param {{signal: AbortSignal, onJob?: (j: any) => void, onCreated?: (j: any) => void, schema?: any}} o
  */
 async function run(api, file, kind, o) {
   const id = randomId();
@@ -2671,6 +2708,7 @@ async function run(api, file, kind, o) {
       throw e;
     }
   }
+  if (o.onCreated) o.onCreated(job);
   for (let n = 0; ; n++) {
     const j = await api.job(job.job_id, o.signal);
     if (o.onJob) o.onJob(j);
@@ -2686,6 +2724,7 @@ __exp.offered = offered;
 __exp.fieldRows = fieldRows;
 __exp.failedPages = failedPages;
 __exp.failedInfo = failedInfo;
+__exp.pageNotes = pageNotes;
 __exp.splitDocs = splitDocs;
 __exp.run = run;
 };
@@ -3103,7 +3142,7 @@ const { callText } = __req('apicall.js');
 const { toLines, parseLines } = __req('schemaedit.js');
 const { TEMPLATE, TEMPLATE_HINT, TEMPLATE_OWN } = __req('strings.js');
 const { RESTORED_NOTE } = __req('strings.js');
-const { REPORT_TITLE, REPORT_NEEDS, REPORT_NONE, REPORT_NOJOB, REPORT_FAIL, REPORT_LOG, PREVIEW_LINE, SERVICE_DOWN, RUN_MISS, RUN_SWITCH, RUN_AGAIN, CARD_NAME, PDF_MAKING, pdfSaved, splitFailed, SPLIT_AGAIN, redactPage, redactCount, redactProgress, REDACT_FAIL, REDACT_TERMS_HINT, CHECK_HINT, NONE_GALLERY, SAMPLE_NO_FILE, LOG_EMPTY, LOG_OFF, KEY_GET, HOST_PLAIN, HOST_BAD, SETUP_NEEDS, LOG_NEEDS_OFF, EXTRACT_NOTICE, CARD_TEXT, NOT_BUILT, REDACT_LOCAL, KEY_HINT, KEY_REMEMBER, EMPTY_NO_KEY, LAST_LINE, LAST_SHOW, LAST_FORGET, NONE_TEXT, SITE_HOST, localNetworkText, ONLY_FIRST, KEY_AGAIN, readingText, throttleText, COUNT_TIP, NEW_FILE } = __req('strings.js');
+const { REPORT_TITLE, REPORT_NEEDS, REPORT_NONE, REPORT_NOJOB, REPORT_FAIL, REPORT_LOG, REPORT_JOB_ID, REPORT_COPY_ID, REPORT_COPIED, REPORT_JOB_KIND, pageNote, PREVIEW_LINE, SERVICE_DOWN, RUN_MISS, RUN_SWITCH, RUN_AGAIN, CARD_NAME, PDF_MAKING, pdfSaved, splitFailed, SPLIT_AGAIN, redactPage, redactCount, redactProgress, REDACT_FAIL, REDACT_TERMS_HINT, CHECK_HINT, NONE_GALLERY, SAMPLE_NO_FILE, LOG_EMPTY, LOG_OFF, KEY_GET, HOST_PLAIN, HOST_BAD, SETUP_NEEDS, LOG_NEEDS_OFF, EXTRACT_NOTICE, CARD_TEXT, NOT_BUILT, REDACT_LOCAL, KEY_HINT, KEY_REMEMBER, EMPTY_NO_KEY, LAST_LINE, LAST_SHOW, LAST_FORGET, NONE_TEXT, SITE_HOST, localNetworkText, ONLY_FIRST, KEY_AGAIN, readingText, throttleText, COUNT_TIP, NEW_FILE, WIDE_ENTER, WIDE_EXIT, WIDE_HINT, WIDE_HINT_CLOSE } = __req('strings.js');
 const { kindOf, ACCEPT, openLog } = __req('input.js');
 const { fileName, cleanName, isoDate, pdf, zip } = __req('split.js');
 
@@ -3209,7 +3248,8 @@ function mount(host, cfg) {
   const keyBtn = h('button', { type: 'button', class: 'ov-tbtn', 'aria-expanded': 'false', title: 'API key', 'data-t': 'key' });
   keyBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + ICON.key + '</svg>';
   keyBtn.append(h('span', { class: 'ov-tl', text: 'API key' }));
-  const wideBtn = ib({ 'aria-pressed': 'false', 'aria-label': 'Full window', title: 'Full window', 'data-t': 'wide' }, ICON.wide);
+  const wideBtn = ib({ 'aria-pressed': 'false', 'aria-label': WIDE_ENTER, title: WIDE_ENTER, 'data-t': 'wide', class: 'ov-ib ov-wide' }, ICON.wide);
+  wideBtn.append(h('span', { class: 'ov-wl', text: WIDE_EXIT }));
   const sideBtn = ib({ 'aria-expanded': 'false', 'aria-label': 'Side bar: tools and options', title: 'Show or hide the side bar', 'data-t': 'sidebar' }, ICON.side);
   /** The stored runs of a gallery document: switching shows the text, tables and layers of that run. */
   const runSel = /** @type {HTMLSelectElement} */ (h('select', { class: 'ov-runsel', 'aria-label': 'Stored run', title: 'The stored runs of this document: choose one to see its result', 'data-t': 'runsel', hidden: '' }));
@@ -3406,7 +3446,7 @@ function mount(host, cfg) {
     thrMenu.hidden = false;
     thrBtn.setAttribute('aria-expanded', 'true');
   });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !thrMenu.hidden) { closeThr(); thrBtn.focus(); } });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !thrMenu.hidden) { e.preventDefault(); closeThr(); thrBtn.focus(); } });
 
   /** The width of the page: the width of the stage, the whole page in view, or a share of 800 px. */
   function applyZoom() {
@@ -3582,6 +3622,7 @@ function mount(host, cfg) {
     countEl.textContent = counted.n ? counted.n + (counted.n === 1 ? ' page' : ' pages') + ' counted' : '';
     if (s.name === 'done' && !session.doc && !cfg.demo) note(RESTORED_NOTE);
     renderLast();
+    if (s.jobId && hasKey() && !gal) noteJob(s.jobId, 'ocr', '', null);
     if (!pendingJob && !(lastJob && s.name === 'empty')) store.setJobHash(s.jobId && s.name !== 'failed' && hasKey() ? s.jobId : '');
     renderCards();
     void showPage();
@@ -3727,8 +3768,28 @@ function mount(host, cfg) {
     return outBox([pre], () => api.log().map(logLine).join('\n'), 'log-out').el;
   }
 
+  /** Every job of this session, the one that ran last on top of the report. @type {Array<{id: string, kind: string, pipeline: string, notes: Array<{page: number, code: string}>}>} */
+  const jobLog = [];
+  /** @param {string} id @param {string} kind @param {string} pipeline @param {Array<{page: number, code: string}> | null} notes */
+  function noteJob(id, kind, pipeline, notes) {
+    const j = jobLog.find((x) => x.id === id);
+    if (!j) { jobLog.push({ id, kind, pipeline, notes: notes || [] }); return; }
+    if (pipeline) j.pipeline = pipeline;
+    if (notes) j.notes = notes;
+  }
+
   /** @param {unknown} n */
   const sec = (n) => (typeof n === 'number' ? (Math.round(n * 1000) / 1000) + ' s' : '');
+
+  /** Pages of the report: a number, a list, or the counts of the service ({total, done, failed, not_run, pending}). @param {any} p */
+  function pagesText(p) {
+    if (Array.isArray(p)) return String(p.length);
+    if (p && typeof p === 'object') {
+      const rest = [['done', 'done'], ['failed', 'failed'], ['not_run', 'not run'], ['pending', 'pending']].filter(([k]) => p[k]).map(([k, t]) => p[k] + ' ' + t);
+      return String(p.total != null ? p.total : '?') + (rest.length ? ' (' + rest.join(', ') + ')' : '');
+    }
+    return String(p);
+  }
 
   /** The report as rows: pipeline, hash, pages, seconds per stage, seconds per page. Hashes only, never a model name. @param {any} rep */
   function reportRows(rep) {
@@ -3737,7 +3798,7 @@ function mount(host, cfg) {
     if (rep.pipeline) rows.push(['Pipeline', rep.pipeline]);
     if (rep.pipeline_hash) rows.push(['Pipeline hash', rep.pipeline_hash]);
     for (const m of rep.models || []) rows.push(['Model hash', m.sha256 + (m.precision ? ' (' + m.precision + ')' : '')]);
-    if (rep.pages != null || rep.page_count != null) rows.push(['Pages', String(rep.page_count != null ? rep.page_count : Array.isArray(rep.pages) ? rep.pages.length : rep.pages)]);
+    if (rep.pages != null || rep.page_count != null) rows.push(['Pages', pagesText(rep.page_count != null ? rep.page_count : rep.pages)]);
     const sc = rep.seconds || {};
     for (const [k, t] of [['render', 'Render'], ['scheduler_wait', 'Wait for a turn'], ['queue', 'Queue'], ['read', 'Read'], ['worker', 'Worker']]) if (typeof sc[k] === 'number') rows.push([t, sec(sc[k])]);
     for (const ps of rep.page_stages || []) {
@@ -3766,31 +3827,51 @@ function mount(host, cfg) {
     return outBox([h('pre', { class: 'ov-pre', 'data-t': 'report-open', text: lines() })], lines, 'report-open-out').el;
   }
 
-  /** The job report: the report of the service on top (times per stage and page, pipeline, hash, pages), the requests of this browser below, collapsed. */
+  /** The job report: every job of this session, the last one on top. Per job: id (to copy), pipeline, hash, pages, times per stage and page, pages with an error or a warning. The requests of this browser below, collapsed. */
   function reportView() {
     const body = h('div', { class: 'ov-rep', 'data-t': 'report' });
     const ob = outBox([body], null, 'report-out');
+    /** @type {string[]} */
+    let texts = [];
+    const text = () => texts.filter(Boolean).join('\n');
+    const setOut = () => { ob.setCopy(text); ob.setFile(fileOf('_report.txt', 'text/plain;charset=utf-8', text)); };
     /** @param {string[][]} rows */
-    const show = (rows) => {
-      const tb = h('tbody', {}, ...rows.map((r) => h('tr', {}, h('th', { scope: 'row', text: r[0] }), h('td', { text: r[1] }))));
-      body.replaceChildren(h('table', { class: 'ov-ft' }, tb));
-      ob.setCopy(() => rows.map((r) => r[0] + ': ' + r[1]).join('\n'));
-      ob.setFile(fileOf('_report.txt', 'text/plain;charset=utf-8', () => rows.map((r) => r[0] + ': ' + r[1]).join('\n')));
-    };
+    const table = (rows) => h('table', { class: 'ov-ft' }, h('tbody', {}, ...rows.map((r) => h('tr', {}, h('th', { scope: 'row', text: r[0] }), h('td', { text: r[1] })))));
     /** @param {string} t */
     const none = (t) => body.replaceChildren(h('p', { class: 'ov-ph', 'data-t': 'report-none', text: t }));
     const det = h('details', { class: 'ov-det', 'data-t': 'report-log' }, h('summary', { text: REPORT_LOG }), logBlock(), openSteps());
     if (openLog.length) /** @type {HTMLDetailsElement} */ (det).open = true;
     openPanel('report', REPORT_TITLE, REPORT_NEEDS, ob.el, det);
-    const id = session.state.jobId;
     if (gal) {
       const l = gal.run && gal.run.lauf;
-      if (l && Object.keys(l).length) show(storedRows(l)); else none(REPORT_NONE);
-    } else if (!id || !hasKey()) none(REPORT_NOJOB);
-    else {
-      none('Loading…');
-      api.jobReport(id, undefined).then((rep) => show(reportRows(rep)), () => none(REPORT_FAIL));
+      if (l && Object.keys(l).length) { const rows = storedRows(l); body.replaceChildren(table(rows)); texts = [rows.map((r) => r[0] + ': ' + r[1]).join('\n')]; setOut(); } else none(REPORT_NONE);
+      return;
     }
+    const jobs = hasKey() ? jobLog.slice().reverse() : [];
+    if (!jobs.length) { none(REPORT_NOJOB); return; }
+    texts = jobs.map(() => '');
+    const cards = jobs.map((job, i) => {
+      const kindName = /** @type {Record<string, string>} */ (REPORT_JOB_KIND)[job.kind] || job.kind;
+      const head = h('h4', { class: 'ov-sub', 'data-t': 'job-head', text: kindName + (job.pipeline ? ' · ' + job.pipeline : '') });
+      const copy = /** @type {HTMLButtonElement} */ (h('button', { type: 'button', class: 'ov-btn', 'data-t': 'job-copy', 'aria-label': REPORT_COPY_ID, text: 'Copy' }));
+      copy.addEventListener('click', () => { try { void navigator.clipboard.writeText(job.id); copy.textContent = REPORT_COPIED; window.setTimeout(() => { copy.textContent = 'Copy'; }, 1500); } catch (e) { /* the id stays on the page to select */ } });
+      const idRow = h('p', { class: 'ov-row', 'data-t': 'job-id-row' }, h('span', { text: REPORT_JOB_ID + ': ' }), h('code', { 'data-t': 'job-id', text: job.id }), copy);
+      const rest = h('div', { 'data-t': 'job-rows' }, h('p', { class: 'ov-ph', text: 'Loading…' }));
+      const notes = job.notes.length ? h('div', { class: 'ov-err', 'data-t': 'job-notes' }, ...job.notes.map((n) => h('p', { text: pageNote(n.page, n.code) }))) : null;
+      const noteText = job.notes.map((n) => pageNote(n.page, n.code)).join('\n');
+      const mark = kindName + (job.pipeline ? ' · ' + job.pipeline : '') + '\n' + REPORT_JOB_ID + ': ' + job.id;
+      texts[i] = mark + (noteText ? '\n' + noteText : '');
+      api.jobReport(job.id, undefined).then((rep) => {
+        const rows = reportRows(rep);
+        if (!job.pipeline && rep.pipeline) head.textContent = kindName + ' · ' + rep.pipeline;
+        rest.replaceChildren(table(rows));
+        texts[i] = mark + '\n' + rows.map((r) => r[0] + ': ' + r[1]).join('\n') + (noteText ? '\n' + noteText : '');
+        setOut();
+      }, () => rest.replaceChildren(h('p', { class: 'ov-ph', 'data-t': 'report-none', text: REPORT_FAIL })));
+      return h('section', { class: 'ov-job', 'data-t': 'report-job' }, head, idRow, ...(notes ? [notes] : []), rest);
+    });
+    body.replaceChildren(...cards);
+    setOut();
   }
 
   function closePanel() {
@@ -4414,11 +4495,14 @@ function mount(host, cfg) {
       let f;
       if (d) f = d.file;
       else { const b = await (await fetch(/** @type {string} */ (gal && gal.image))).blob(); f = new File([b], 'page.webp', { type: b.type || 'image/webp' }); }
-      const ans = await X.run(api, f, k, { signal: xctl.signal, schema });
+      let jid = '';
+      const ans = await X.run(api, f, k, { signal: xctl.signal, schema, onCreated: (j) => { jid = String(j.job_id || ''); if (jid) noteJob(jid, k, String(j.pipeline || ''), null); } });
+      if (jid) noteJob(jid, k, String(ans.pipeline || ''), X.pageNotes(ans));
       out.replaceChildren(renderExtract(k, ans, schema, ob));
     } catch (e) {
       if (e instanceof ApiError && e.kind === 'aborted') return;
       const f = e instanceof ApiError ? { code: e.code, status: e.status, message: e.message === e.code ? '' : e.message } : { code: 'internal', status: 0, message: '' };
+      if (f.code === 'rate_limited') f.code = 'extract_rate_limited'; // the daily pages of the preview, not the free OCR page
       out.replaceChildren(h('p', { class: 'ov-err', text: ftext(f) }));
     } finally {
       free();
@@ -4792,10 +4876,30 @@ function mount(host, cfg) {
     root.classList.toggle('focus', on);
     document.documentElement.style.overflow = on ? 'hidden' : '';
     wideBtn.setAttribute('aria-pressed', String(on));
+    const t = on ? WIDE_EXIT : WIDE_ENTER;
+    wideBtn.setAttribute('aria-label', t);
+    wideBtn.title = t;
     applyZoom();
   }
-  wideBtn.addEventListener('click', () => setWide(!root.classList.contains('focus')));
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && root.classList.contains('focus')) setWide(false); });
+  // the hint at the button, once: closes with the first click on the button or the cross, and the browser remembers it
+  const HINT_KEY = 'ocv.wide-hint';
+  const hintSeen = () => { try { return localStorage.getItem(HINT_KEY) === '1'; } catch (e) { return false; } };
+  const standalone = () => { try { return matchMedia('(display-mode: standalone)').matches; } catch (e) { return false; } };
+  /** @type {HTMLElement | null} */
+  let wideHint = null;
+  function closeWideHint() {
+    if (wideHint) { wideHint.remove(); wideHint = null; }
+    try { localStorage.setItem(HINT_KEY, '1'); } catch (e) { /* the hint may come again */ }
+  }
+  if (!cfg.demo && !hintSeen() && !standalone()) {
+    const x = h('button', { type: 'button', class: 'ov-wh-x', 'aria-label': WIDE_HINT_CLOSE, title: WIDE_HINT_CLOSE, 'data-t': 'wide-hint-x', text: '×' });
+    x.addEventListener('click', closeWideHint);
+    wideHint = h('div', { class: 'ov-wh', role: 'note', 'data-t': 'wide-hint' }, h('span', { text: WIDE_HINT }), x);
+    tb.insertBefore(wideHint, tb.lastElementChild);  // in the row, before the buttons: it covers nothing
+  }
+  wideBtn.addEventListener('click', () => { if (wideHint) closeWideHint(); setWide(!root.classList.contains('focus')); });
+  // Esc leaves the full window, unless a menu, the find bar or a panel takes that Esc itself (they handle it first and stop it)
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !e.defaultPrevented && root.classList.contains('focus')) setWide(false); });
   // the divider: drag or arrow keys set the width of the side bar
   let drag = false;
   /** @param {number} px */
